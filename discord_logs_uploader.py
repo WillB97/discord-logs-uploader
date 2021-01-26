@@ -4,7 +4,7 @@ import re
 import sys
 import logging
 import tempfile
-from typing import IO
+from typing import IO, Tuple, Optional
 from pathlib import Path
 from zipfile import ZipFile, BadZipFile, is_zipfile
 
@@ -32,6 +32,63 @@ async def log_and_reply(ctx: commands.Context, error_str: str) -> None:
     await ctx.reply(error_str)
 
 
+async def get_team_channel(
+    ctx: commands.Context,
+    archive_name: str,
+    zip_name: str,
+) -> Tuple[str, Optional[discord.TextChannel]]:
+    # extract team name from filename
+    tla_search = re.match(TEAM_PREFIX + r'(.*?)[-.]', archive_name)
+    if not isinstance(tla_search, re.Match):
+        await log_and_reply(
+            ctx,
+            f"# Failed to extract a TLA from {archive_name} in {zip_name}",
+        )
+        return '', None
+
+    tla = tla_search.group(1)
+
+    # get team's channel by name
+    channel = discord.utils.get(
+        ctx.guild.channels,
+        name=f"{TEAM_PREFIX}{tla}",
+    )
+    if not channel:
+        await log_and_reply(
+            ctx,
+            f"# Channel {TEAM_PREFIX}{tla} not found, "
+            f"unable to upload {archive_name}",
+        )
+        return tla, None
+    elif not isinstance(channel, discord.TextChannel):
+        await log_and_reply(
+            ctx,
+            f"# {channel.name} is not a text channel, unable to send message",
+        )
+        return tla, None
+    return tla, channel
+
+
+async def pre_test_zipfile(
+    ctx: commands.Context,
+    archive_name: str,
+    zipfile: ZipFile,
+    zip_name: str,
+) -> bool:
+    if not archive_name.lower().endswith('.zip'):  # skip non-zips
+        logger.debug(f"{archive_name} from {zip_name} is not a ZIP, skipping")
+        return False
+
+    # skip files not starting with TEAM_PREFIX
+    if not archive_name.lower().startswith(TEAM_PREFIX):
+        logger.debug(
+            f"{archive_name} from {zip_name} "
+            f"doesn't start with {TEAM_PREFIX}, skipping",
+        )
+        return False
+    return True
+
+
 async def logs_upload(
     ctx: commands.Context,
     file: IO[bytes],
@@ -45,16 +102,7 @@ async def logs_upload(
 
             with ZipFile(file) as zipfile:
                 for archive_name in zipfile.namelist():
-                    if not archive_name.lower().endswith('.zip'):  # skip non-zips
-                        logger.debug(f"{archive_name} from {zip_name} is not a ZIP, skipping")
-                        continue
-
-                    # skip files not starting with TEAM_PREFIX
-                    if not archive_name.lower().startswith(TEAM_PREFIX):
-                        logger.debug(
-                            f"{archive_name} from {zip_name} "
-                            f"doesn't start with {TEAM_PREFIX}, skipping",
-                        )
+                    if not pre_test_zipfile(ctx, archive_name, zipfile, zip_name):
                         continue
 
                     zipfile.extract(archive_name, path=tmpdir)
@@ -67,34 +115,9 @@ async def logs_upload(
                         # The file will be removed with the temporary directory
                         continue
 
-                    # extract team name from filename
-                    tla_search = re.match(TEAM_PREFIX + r'(.*?)[-.]', archive_name)
-                    if not isinstance(tla_search, re.Match):
-                        await log_and_reply(
-                            ctx,
-                            f"# Failed to extract a TLA from {archive_name} in {zip_name}",
-                        )
-                        continue
-
-                    tla = tla_search.group(1)
-
                     # get team's channel
-                    channel = discord.utils.get(
-                        ctx.guild.channels,
-                        name=f"{TEAM_PREFIX}{tla}",
-                    )
+                    tla, channel = await get_team_channel(ctx, archive_name, zip_name)
                     if not channel:
-                        await log_and_reply(
-                            ctx,
-                            f"# Channel {TEAM_PREFIX}{tla} not found, "
-                            f"unable to upload {archive_name}",
-                        )
-                        continue
-                    elif not isinstance(channel, discord.TextChannel):
-                        await log_and_reply(
-                            ctx,
-                            f"# {channel.name} is not a text channel, unable to send message",
-                        )
                         continue
 
                     # upload to team channel with message
