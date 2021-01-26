@@ -6,4 +6,4 @@ if [ -z "$MYPY" ]; then
     MYPY=mypy
 fi
 
-exec "$MYPY" discord_match_logs_uploader.py "$@"
+exec "$MYPY" discord_logs_uploader.py "$@"

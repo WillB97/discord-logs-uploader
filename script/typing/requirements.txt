@@ -1,1 +1,2 @@
 mypy
+discord.py-stubs

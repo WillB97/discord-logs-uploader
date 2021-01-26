@@ -4,7 +4,7 @@ import re
 import sys
 import logging
 import tempfile
-from typing import IO, Tuple, Optional
+from typing import IO, cast, Tuple, BinaryIO, Optional
 from pathlib import Path
 from zipfile import ZipFile, BadZipFile, is_zipfile
 
@@ -49,6 +49,8 @@ async def get_team_channel(
     tla = tla_search.group(1)
 
     # get team's channel by name
+    if ctx.guild is None:
+        raise commands.NoPrivateMessage
     channel = discord.utils.get(
         ctx.guild.channels,
         name=f"{TEAM_PREFIX}{tla}",
@@ -162,7 +164,7 @@ async def on_ready() -> None:
 
 @bot.command()
 @commands.guild_only()
-@commands.check_any(commands.has_role(ADMIN_ROLE), commands.is_owner())
+@commands.check_any(commands.has_role(ADMIN_ROLE), commands.is_owner())  # type: ignore
 async def logs_import(ctx: commands.Context, event_name: str = "") -> None:
     """
     Send a combined logs archive to the bot for distribution to teams
@@ -184,7 +186,7 @@ async def logs_import(ctx: commands.Context, event_name: str = "") -> None:
             filename = attachment.filename
 
             with ctx.typing():  # provides feedback that the bot is processing
-                await attachment.save(zipfile, seek_begin=True)
+                await attachment.save(cast(BinaryIO, zipfile), seek_begin=True)
 
                 await logs_upload(ctx, zipfile, filename, event_name)
     else:
@@ -195,4 +197,4 @@ async def logs_import(ctx: commands.Context, event_name: str = "") -> None:
 
 
 load_dotenv()
-bot.run(os.getenv('DISCORD_TOKEN'))
+bot.run(os.getenv('DISCORD_TOKEN', ''))
