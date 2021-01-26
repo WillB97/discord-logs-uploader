@@ -161,7 +161,7 @@ async def on_ready() -> None:
 
 
 @bot.command()
-# @commands.guild_only()
+@commands.guild_only()
 @commands.check_any(commands.has_role(ADMIN_ROLE), commands.is_owner())
 async def logs_import(ctx: commands.Context, event_name: str = "") -> None:
     """
