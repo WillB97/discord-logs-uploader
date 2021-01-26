@@ -4,6 +4,7 @@ import re
 import sys
 import logging
 import tempfile
+from typing import IO
 from pathlib import Path
 from zipfile import ZipFile, BadZipFile, is_zipfile
 
@@ -16,8 +17,6 @@ ADMIN_ROLE = 'Blue Shirt'
 
 # prefix of team channels
 TEAM_PREFIX = 'team-'
-
-DOWNLOADS_DIRECTORY = Path(__file__).parent / 'downloads'
 
 logger = logging.getLogger('logs_uploader')
 logger.setLevel(logging.INFO)
@@ -33,7 +32,12 @@ async def log_and_reply(ctx: commands.Context, error_str: str) -> None:
     await ctx.reply(error_str)
 
 
-async def logs_upload(ctx: commands.Context, file: Path, event_name: str) -> None:
+async def logs_upload(
+    ctx: commands.Context,
+    file: IO[bytes],
+    zip_name: str,
+    event_name: str,
+) -> None:
     try:
         with tempfile.TemporaryDirectory() as tmpdir_name:
             tmpdir = Path(tmpdir_name)
@@ -42,13 +46,13 @@ async def logs_upload(ctx: commands.Context, file: Path, event_name: str) -> Non
             with ZipFile(file) as zipfile:
                 for archive_name in zipfile.namelist():
                     if not archive_name.lower().endswith('.zip'):  # skip non-zips
-                        logger.debug(f"{archive_name} from {file.name} is not a ZIP, skipping")
+                        logger.debug(f"{archive_name} from {zip_name} is not a ZIP, skipping")
                         continue
 
                     # skip files not starting with TEAM_PREFIX
                     if not archive_name.lower().startswith(TEAM_PREFIX):
                         logger.debug(
-                            f"{archive_name} from {file.name} "
+                            f"{archive_name} from {zip_name} "
                             f"doesn't start with {TEAM_PREFIX}, skipping",
                         )
                         continue
@@ -58,7 +62,7 @@ async def logs_upload(ctx: commands.Context, file: Path, event_name: str) -> Non
                     if not is_zipfile(tmpdir / archive_name):  # test file is a valid zip
                         await log_and_reply(
                             ctx,
-                            f"# {archive_name} from {file.name} is not a valid ZIP file",
+                            f"# {archive_name} from {zip_name} is not a valid ZIP file",
                         )
                         # The file will be removed with the temporary directory
                         continue
@@ -68,7 +72,7 @@ async def logs_upload(ctx: commands.Context, file: Path, event_name: str) -> Non
                     if not isinstance(tla_search, re.Match):
                         await log_and_reply(
                             ctx,
-                            f"# Failed to extract a TLA from {archive_name} in {file.name}",
+                            f"# Failed to extract a TLA from {archive_name} in {zip_name}",
                         )
                         continue
 
@@ -125,9 +129,7 @@ async def logs_upload(ctx: commands.Context, file: Path, event_name: str) -> Non
                 f"{', '.join(completed_tlas)}",
             )
     except BadZipFile:
-        await log_and_reply(ctx, f"# {file.name} is not a valid ZIP file")
-    finally:
-        file.unlink()  # delete the zip file
+        await log_and_reply(ctx, f"# {zip_name} is not a valid ZIP file")
 
 
 @bot.event
@@ -154,13 +156,13 @@ async def logs_import(ctx: commands.Context, event_name: str = "") -> None:
         ctx.message.attachments
         and ctx.message.attachments[0].filename.lower().endswith('.zip')
     ):
-        attachment = ctx.message.attachments[0]
-        save_file = DOWNLOADS_DIRECTORY / attachment.filename
+        with tempfile.TemporaryFile(suffix='.zip') as zipfile:
+            attachment = ctx.message.attachments[0]
+            filename = attachment.filename
 
-        with save_file.open('wb') as zipfile:
-            await attachment.save(zipfile)
+            await attachment.save(zipfile, seek_begin=True)
 
-        await logs_upload(ctx, save_file, event_name)
+            await logs_upload(ctx, zipfile, filename, event_name)
     else:
         logger.error(
             f"ZIP file not attached to '{ctx.message.content}' from {ctx.author}",
