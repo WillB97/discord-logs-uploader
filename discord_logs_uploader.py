@@ -160,9 +160,10 @@ async def logs_import(ctx: commands.Context, event_name: str = "") -> None:
             attachment = ctx.message.attachments[0]
             filename = attachment.filename
 
-            await attachment.save(zipfile, seek_begin=True)
+            with ctx.typing():  # provides feedback that the bot is processing
+                await attachment.save(zipfile, seek_begin=True)
 
-            await logs_upload(ctx, zipfile, filename, event_name)
+                await logs_upload(ctx, zipfile, filename, event_name)
     else:
         logger.error(
             f"ZIP file not attached to '{ctx.message.content}' from {ctx.author}",
