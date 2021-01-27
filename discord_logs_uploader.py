@@ -32,6 +32,34 @@ async def log_and_reply(ctx: commands.Context, error_str: str) -> None:
     await ctx.reply(error_str)
 
 
+async def get_channel(
+    ctx: commands.Context,
+    channel_name: str,
+) -> Optional[discord.TextChannel]:
+    # get team's channel by name
+    if ctx.guild is None:
+        raise commands.NoPrivateMessage
+    channel = discord.utils.get(
+        ctx.guild.channels,
+        name=channel_name,
+    )
+
+    if not channel:
+        await log_and_reply(
+            ctx,
+            f"# Channel {channel_name} not found, unable to send message",
+        )
+        return None
+    elif not isinstance(channel, discord.TextChannel):
+        await log_and_reply(
+            ctx,
+            f"# {channel.name} is not a text channel, unable to send message",
+        )
+        return None
+
+    return channel
+
+
 async def get_team_channel(
     ctx: commands.Context,
     archive_name: str,
@@ -47,32 +75,12 @@ async def get_team_channel(
         return '', None
 
     tla = tla_search.group(1)
+    channel = await get_channel(ctx, f"{TEAM_PREFIX}{tla}")
 
-    # get team's channel by name
-    if ctx.guild is None:
-        raise commands.NoPrivateMessage
-    channel = discord.utils.get(
-        ctx.guild.channels,
-        name=f"{TEAM_PREFIX}{tla}",
-    )
-    if not channel:
-        await log_and_reply(
-            ctx,
-            f"# Channel {TEAM_PREFIX}{tla} not found, "
-            f"unable to upload {archive_name}",
-        )
-        return tla, None
-    elif not isinstance(channel, discord.TextChannel):
-        await log_and_reply(
-            ctx,
-            f"# {channel.name} is not a text channel, unable to send message",
-        )
-        return tla, None
     return tla, channel
 
 
-async def pre_test_zipfile(
-    ctx: commands.Context,
+def pre_test_zipfile(
     archive_name: str,
     zipfile: ZipFile,
     zip_name: str,
@@ -91,6 +99,35 @@ async def pre_test_zipfile(
     return True
 
 
+async def send_file(
+    ctx: commands.Context,
+    channel: discord.TextChannel,
+    archive: Path,
+    event_name: str,
+    msg_str: str = "Here are your logs",
+    logging_str: str = "Uploaded logs",
+) -> bool:
+    try:
+        await channel.send(
+            content=f"{msg_str} from {event_name if event_name else 'today'}",
+            file=discord.File(str(archive)),
+        )
+        logger.debug(
+            f"{logging_str} from {event_name if event_name else 'today'}",
+        )
+    except discord.HTTPException as e:  # handle file size issues
+        if e.status == 413:
+            await log_and_reply(
+                ctx,
+                f"# {archive.name} was too large to upload at "
+                f"{archive.stat().st_size / 1000**2 :.3f} MiB",
+            )
+            return False
+        else:
+            raise e
+    return True
+
+
 async def logs_upload(
     ctx: commands.Context,
     file: IO[bytes],
@@ -104,7 +141,7 @@ async def logs_upload(
 
             with ZipFile(file) as zipfile:
                 for archive_name in zipfile.namelist():
-                    if not pre_test_zipfile(ctx, archive_name, zipfile, zip_name):
+                    if not pre_test_zipfile(archive_name, zipfile, zip_name):
                         continue
 
                     zipfile.extract(archive_name, path=tmpdir)
@@ -123,29 +160,14 @@ async def logs_upload(
                         continue
 
                     # upload to team channel with message
-                    try:
-                        await channel.send(
-                            content=(
-                                "Here are your logs from "
-                                f"{event_name if event_name else 'today'}"
-                            ),
-                            file=discord.File(str(tmpdir / archive_name)),
-                        )
-                        logger.debug(
-                            f"Uploaded logs for {tla} from "
-                            f"{event_name if event_name else 'today'}",
-                        )
-                    except discord.HTTPException as e:  # handle file size issues
-                        if e.status == 413:
-                            file_size = (tmpdir / archive_name).stat().st_size
-                            await log_and_reply(
-                                ctx,
-                                f"# {archive_name} was too large to upload at "
-                                f"{file_size / 1000**2 :.3f} MiB",
-                            )
-                            continue
-                        else:
-                            raise e
+                    if not await send_file(
+                        ctx,
+                        channel,
+                        tmpdir / archive_name,
+                        event_name,
+                        logging_str=f"Uploaded logs for {tla}",
+                    ):
+                        continue
 
                     completed_tlas.append(tla)
 
@@ -174,7 +196,8 @@ async def logs_import(ctx: commands.Context, event_name: str = "") -> None:
 
     for file in ctx.message.attachments:
         logger.debug(
-            f'Files received {file.filename}: {file.size/1024**2}MB, {file.size/1000**2}MiB',
+            f"Files received {file.filename}: "
+            f"{file.size/1024**2 :.3f}MB, {file.size/1000**2:.3f}MiB",
         )
 
     if (
