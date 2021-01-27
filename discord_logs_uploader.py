@@ -24,6 +24,19 @@ handler = logging.StreamHandler(sys.stdout)
 handler.setLevel(logging.INFO)
 logger.addHandler(handler)
 
+
+# Don't post to team channels and force the guild used so testing can you DMs
+DISCORD_TESTING = bool(os.getenv('DISCORD_TESTING'))
+if DISCORD_TESTING:
+    # Allow DMs in testing
+    guild_only = commands.check_any(commands.guild_only(), commands.dm_only())  # type: ignore
+    # print all debug messages
+    logger.setLevel(logging.DEBUG)
+    handler.setLevel(logging.DEBUG)
+else:
+    guild_only = commands.guild_only()
+
+
 bot = commands.Bot(command_prefix='!')
 
 
@@ -36,11 +49,19 @@ async def get_channel(
     ctx: commands.Context,
     channel_name: str,
 ) -> Optional[discord.TextChannel]:
+    guild = ctx.guild
+    if DISCORD_TESTING:
+        guild_id = os.getenv('DISCORD_GUILD')
+        if guild_id is None:
+            guild = None
+        else:
+            guild = bot.get_guild(int(guild_id))
+
     # get team's channel by name
-    if ctx.guild is None:
+    if guild is None:
         raise commands.NoPrivateMessage
     channel = discord.utils.get(
-        ctx.guild.channels,
+        guild.channels,
         name=channel_name,
     )
 
@@ -108,10 +129,20 @@ async def send_file(
     logging_str: str = "Uploaded logs",
 ) -> bool:
     try:
-        await channel.send(
-            content=f"{msg_str} from {event_name if event_name else 'today'}",
-            file=discord.File(str(archive)),
-        )
+        if DISCORD_TESTING:  # don't actually send message in testing
+            if (archive.stat().st_size / 1000**2) > 8:
+                # discord.HTTPException requires aiohttp.ClientResponse
+                await log_and_reply(
+                    ctx,
+                    f"# {archive.name} was too large to upload at "
+                    f"{archive.stat().st_size / 1000**2 :.3f} MiB",
+                )
+                return False
+        else:
+            await channel.send(
+                content=f"{msg_str} from {event_name if event_name else 'today'}",
+                file=discord.File(str(archive)),
+            )
         logger.debug(
             f"{logging_str} from {event_name if event_name else 'today'}",
         )
@@ -182,10 +213,12 @@ async def logs_upload(
 @bot.event
 async def on_ready() -> None:
     logger.info(f"{bot.user} has connected to Discord!")
+    if DISCORD_TESTING:
+        logger.info("Bot is running in test mode")
 
 
 @bot.command()
-@commands.guild_only()
+@guild_only
 @commands.check_any(commands.has_role(ADMIN_ROLE), commands.is_owner())  # type: ignore
 async def logs_import(ctx: commands.Context, event_name: str = "") -> None:
     """
