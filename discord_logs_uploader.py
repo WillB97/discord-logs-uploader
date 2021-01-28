@@ -110,11 +110,7 @@ async def get_team_channel(
     return tla, channel
 
 
-def pre_test_zipfile(
-    archive_name: str,
-    zipfile: ZipFile,
-    zip_name: str,
-) -> bool:
+def pre_test_zipfile(archive_name: str, zipfile: ZipFile, zip_name: str) -> bool:
     if not archive_name.lower().endswith('.zip'):  # skip non-zips
         logger.debug(f"{archive_name} from {zip_name} is not a ZIP, skipping")
         return False
