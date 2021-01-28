@@ -4,11 +4,13 @@ import re
 import sys
 import shutil
 import logging
+import datetime
 import tempfile
 from typing import IO, cast, List, Tuple, BinaryIO, Optional
 from pathlib import Path
 from zipfile import ZipFile, BadZipFile, is_zipfile, ZIP_DEFLATED
 
+import aiohttp
 import discord
 from dotenv import load_dotenv
 from discord.ext import commands
@@ -352,6 +354,45 @@ async def logs_import(ctx: commands.Context, event_name: str = "") -> None:
             f"ZIP file not attached to '{ctx.message.content}' from {ctx.author}",
         )
         await ctx.reply("This command requires the logs archive to be attached")
+
+
+@bot.command()
+@guild_only
+@commands.check_any(commands.has_role(ADMIN_ROLE), commands.is_owner())  # type: ignore
+async def logs_download(ctx: commands.Context, logs_url: str, event_name: str = "") -> None:
+    """
+    Get combined logs archive from URL for distribution to teams, avoids Discord's size limit
+    - logs_url: a download link for the combined logs archive to be distributed to teams
+    - event_name: Optionally set the event name used in the bot's message to teams
+    """
+
+    with tempfile.TemporaryFile(suffix='.zip') as zipfile:
+        if logs_url.endswith('.zip'):
+            filename = logs_url.split("/")[-1]
+        else:
+            filename = f"logs_upload-{datetime.date.today()}.zip"
+
+        with ctx.typing():  # provides feedback that the bot is processing
+            # download zip, using aiohttp
+            async with aiohttp.ClientSession() as session:
+                resp = await session.get(logs_url)
+
+                if resp.status >= 400:
+                    logger.error(
+                        f"Download from {logs_url} failed with error "
+                        f"{resp.status}, {resp.reason}",
+                    )
+                    await ctx.reply("Zip file failed to download")
+                    return
+
+                zipfile_data = await resp.read()
+
+                zipfile.write(zipfile_data)
+
+            # start processing from beginning of the file
+            zipfile.seek(0)
+
+            await logs_upload(ctx, zipfile, filename, event_name)
 
 
 load_dotenv()
