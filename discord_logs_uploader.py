@@ -7,7 +7,7 @@ import logging
 import tempfile
 from typing import IO, cast, List, Tuple, BinaryIO, Optional
 from pathlib import Path
-from zipfile import ZipFile, BadZipFile, is_zipfile
+from zipfile import ZipFile, BadZipFile, is_zipfile, ZIP_DEFLATED
 
 import discord
 from dotenv import load_dotenv
@@ -137,7 +137,8 @@ def match_animation_files(log_name: str, animation_dir: Path) -> List[Path]:
 
 
 def insert_match_files(archive: Path, animation_dir: Path) -> None:
-    with ZipFile(archive, 'a') as zipfile:  # append animations to archive
+    # append animations to archive
+    with ZipFile(archive, 'a', compression=ZIP_DEFLATED) as zipfile:
         for log_name in zipfile.namelist():
             if not log_name.endswith('.txt'):
                 continue
