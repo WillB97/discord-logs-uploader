@@ -2,9 +2,10 @@
 import os
 import re
 import sys
+import shutil
 import logging
 import tempfile
-from typing import IO, cast, Tuple, BinaryIO, Optional
+from typing import IO, cast, List, Tuple, BinaryIO, Optional
 from pathlib import Path
 from zipfile import ZipFile, BadZipFile, is_zipfile
 
@@ -17,6 +18,9 @@ ADMIN_ROLE = 'Blue Shirt'
 
 # prefix of team channels
 TEAM_PREFIX = 'team-'
+
+# a channel to upload files that are available to all teams
+COMMON_CHANNEL = 'general'
 
 logger = logging.getLogger('logs_uploader')
 logger.setLevel(logging.INFO)
@@ -125,6 +129,34 @@ def pre_test_zipfile(
     return True
 
 
+def match_animation_files(log_name: str, animation_dir: Path) -> List[Path]:
+    match_num_search = re.search(r'match-([0-9]+)', log_name)
+    if not isinstance(match_num_search, re.Match):
+        logger.warning(f'Invalid match name: {log_name}')
+        return []
+    match_num = match_num_search[1]
+    logger.debug(f"Fetching animation files for match {match_num}")
+    match_files = animation_dir.glob(f'match-{match_num}.*')
+    return [data_file for data_file in match_files if data_file.suffix != '.mp4']
+
+
+def insert_match_files(archive: Path, animation_dir: Path) -> None:
+    with ZipFile(archive, 'a') as zipfile:  # append animations to archive
+        for log_name in zipfile.namelist():
+            if not log_name.endswith('.txt'):
+                continue
+
+            for animation_file in match_animation_files(log_name, animation_dir):
+                zipfile.write(animation_file.resolve(), animation_file.name)
+
+        # add textures sub-tree
+        for texture in (animation_dir / 'textures').glob('**/*'):
+            zipfile.write(
+                texture.resolve(),
+                texture.relative_to(animation_dir),
+            )
+
+
 async def send_file(
     ctx: commands.Context,
     channel: discord.TextChannel,
@@ -164,18 +196,49 @@ async def send_file(
     return True
 
 
+def extract_animations(zipfile: ZipFile, tmpdir: Path, fully_extract: bool) -> bool:
+    animation_files = [
+        name for name in zipfile.namelist()
+        if name.startswith('animations')
+        and name.endswith('.zip')
+    ]
+
+    if not animation_files:
+        return False
+
+    zipfile.extract(animation_files[0], path=tmpdir)
+
+    # give the animations archive + folder if fixed name
+    shutil.move(str(tmpdir / animation_files[0]), str(tmpdir / 'animations.zip'))
+
+    if fully_extract:
+        with ZipFile(tmpdir / 'animations.zip') as animation_zip:
+            (tmpdir / 'animations').mkdir()
+            animation_zip.extractall(tmpdir / 'animations')
+            logger.debug("Extracting animations.zip")
+    return True
+
+
 async def logs_upload(
     ctx: commands.Context,
     file: IO[bytes],
     zip_name: str,
     event_name: str,
+    team_animation: Optional[bool] = None,  # None = don't upload animations
 ) -> None:
+    animations_found = False
     try:
         with tempfile.TemporaryDirectory() as tmpdir_name:
             tmpdir = Path(tmpdir_name)
             completed_tlas = []
 
             with ZipFile(file) as zipfile:
+                if team_animation is not None:
+                    animations_found = extract_animations(zipfile, tmpdir, team_animation)
+
+                    if not animations_found:
+                        await log_and_reply(ctx, "animations Zip file is missing")
+
                 for archive_name in zipfile.namelist():
                     if not pre_test_zipfile(archive_name, zipfile, zip_name):
                         continue
@@ -190,6 +253,9 @@ async def logs_upload(
                         # The file will be removed with the temporary directory
                         continue
 
+                    if team_animation and animations_found:
+                        insert_match_files(tmpdir / archive_name, tmpdir / 'animations')
+
                     # get team's channel
                     tla, channel = await get_team_channel(ctx, archive_name, zip_name)
                     if not channel:
@@ -203,9 +269,41 @@ async def logs_upload(
                         event_name,
                         logging_str=f"Uploaded logs for {tla}",
                     ):
+                        # try again without animations
+                        # TODO test this clause in unit testing
+                        if team_animation:
+                            # extract original archive, modified version is overwritten
+                            zipfile.extract(archive_name, path=tmpdir)
+
+                            if await send_file(  # retry with original archive
+                                ctx,
+                                channel,
+                                tmpdir / archive_name,
+                                event_name,
+                                logging_str=f"Uploaded only logs for {tla}",
+                            ):
+                                await log_and_reply(
+                                    ctx,
+                                    f"Only able to upload logs for {tla}, "
+                                    "no animations were served",
+                                )
+
                         continue
 
                     completed_tlas.append(tla)
+
+            if team_animation is False and animations_found:
+                common_channel = await get_channel(ctx, COMMON_CHANNEL)
+                # upload animations.zip to common channel
+                if common_channel:
+                    await send_file(
+                        ctx,
+                        common_channel,
+                        tmpdir / 'animations.zip',
+                        event_name,
+                        msg_str="Here are the animation files",
+                        logging_str="Uploaded animations",
+                    )
 
             await ctx.reply(
                 f"Successfully uploaded logs to {len(completed_tlas)} teams: "
