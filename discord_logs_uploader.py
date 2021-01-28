@@ -24,6 +24,13 @@ TEAM_PREFIX = 'team-'
 # a channel to upload files that are available to all teams
 COMMON_CHANNEL = 'general'
 
+# the command options for animation file handling
+ANIMATION_OPTIONS = {
+    'none': None,
+    'team': True,
+    'separate': False,
+}
+
 logger = logging.getLogger('logs_uploader')
 logger.setLevel(logging.INFO)
 handler = logging.StreamHandler(sys.stdout)
@@ -321,15 +328,30 @@ async def on_ready() -> None:
         logger.info("Bot is running in debug mode")
 
 
-@bot.command()
+@bot.command(name='logs')
 @guild_only
 @commands.check_any(commands.has_role(ADMIN_ROLE), commands.is_owner())  # type: ignore
-async def logs_import(ctx: commands.Context, event_name: str = "") -> None:
+async def _logs_import(
+    ctx: commands.Context,
+    animations: str = 'none',
+    event_name: str = "",
+) -> None:
     """
     Send a combined logs archive to the bot for distribution to teams
+    - animations: How the animation files are handled
+        - none: Ignore the animations file
+        - team: Insert teams' matches into their archives
+        - separate: Put the animations archive in the common channel
     - event_name: Optionally set the event name used in the bot's message to teams
     """
     logger.info(f"{ctx.author} ran '{ctx.message.content}' on {ctx.guild}:{ctx.channel}")
+
+    if animations not in ANIMATION_OPTIONS.keys():
+        await ctx.send(
+            f"The animations parameter can only be: {', '.join(ANIMATION_OPTIONS.keys())}",
+        )
+        await ctx.send_help(_logs_import)
+        return
 
     for file in ctx.message.attachments:
         logger.debug(
@@ -353,18 +375,36 @@ async def logs_import(ctx: commands.Context, event_name: str = "") -> None:
         logger.error(
             f"ZIP file not attached to '{ctx.message.content}' from {ctx.author}",
         )
-        await ctx.reply("This command requires the logs archive to be attached")
+        await ctx.send("This command requires the logs archive to be attached")
+        await ctx.send_help(_logs_import)  # print corresponding command help
 
 
-@bot.command()
+@bot.command(name='logs_url')
 @guild_only
 @commands.check_any(commands.has_role(ADMIN_ROLE), commands.is_owner())  # type: ignore
-async def logs_download(ctx: commands.Context, logs_url: str, event_name: str = "") -> None:
+async def _logs_download(
+    ctx: commands.Context,
+    logs_url: str,
+    animations: str = 'none',
+    event_name: str = "",
+) -> None:
     """
     Get combined logs archive from URL for distribution to teams, avoids Discord's size limit
     - logs_url: a download link for the combined logs archive to be distributed to teams
+    - animations: How the animation files are handled
+        - none: Ignore the animations file
+        - team: Insert teams' matches into their archives
+        - separate: Put the animations archive in the common channel
     - event_name: Optionally set the event name used in the bot's message to teams
     """
+    logger.info(f"{ctx.author} ran '{ctx.message.content}' on {ctx.guild}:{ctx.channel}")
+
+    if animations not in ANIMATION_OPTIONS.keys():
+        await ctx.send(
+            f"The animations parameter can only be: {', '.join(ANIMATION_OPTIONS.keys())}",
+        )
+        await ctx.send_help(_logs_download)
+        return
 
     with tempfile.TemporaryFile(suffix='.zip') as zipfile:
         if logs_url.endswith('.zip'):
@@ -393,6 +433,17 @@ async def logs_download(ctx: commands.Context, logs_url: str, event_name: str = 
             zipfile.seek(0)
 
             await logs_upload(ctx, zipfile, filename, event_name)
+
+
+@bot.event
+async def on_command_error(ctx: commands.Context, exception: commands.CommandError) -> None:
+    if isinstance(exception, commands.MissingRequiredArgument):
+        logger.info(f"{ctx.author} ran '{ctx.message.content}' on {ctx.guild}:{ctx.channel}")
+        logger.error(f"A required argument '{exception.param}' is missing")
+        await ctx.send(f"A required argument '{exception.param}' is missing")
+        await ctx.send_help(ctx.command)  # print corresponding command help
+    else:
+        raise exception
 
 
 load_dotenv()
