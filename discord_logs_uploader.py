@@ -27,7 +27,9 @@ logger.addHandler(handler)
 
 # Don't post to team channels and force the guild used so testing can you DMs
 DISCORD_TESTING = bool(os.getenv('DISCORD_TESTING'))
-if DISCORD_TESTING:
+# Just post all messages to calling channel, allow DMs
+DISCORD_DEBUG = bool(os.getenv('DISCORD_DEBUG'))
+if DISCORD_TESTING or DISCORD_DEBUG:
     # Allow DMs in testing
     guild_only = commands.check_any(commands.guild_only(), commands.dm_only())  # type: ignore
     # print all debug messages
@@ -50,6 +52,9 @@ async def get_channel(
     channel_name: str,
 ) -> Optional[discord.TextChannel]:
     guild = ctx.guild
+    if DISCORD_DEBUG:
+        # Always return calling channel
+        return cast(discord.TextChannel, ctx.channel)
     if DISCORD_TESTING:
         guild_id = os.getenv('DISCORD_GUILD')
         if guild_id is None:
@@ -215,6 +220,8 @@ async def on_ready() -> None:
     logger.info(f"{bot.user} has connected to Discord!")
     if DISCORD_TESTING:
         logger.info("Bot is running in test mode")
+    if DISCORD_DEBUG:
+        logger.info("Bot is running in debug mode")
 
 
 @bot.command()
