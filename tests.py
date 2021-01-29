@@ -1,10 +1,16 @@
 import random
 import string
+import asyncio
 import logging
 import tempfile
 import unittest
+from typing import List, Union, Optional
 from pathlib import Path
 from zipfile import ZipFile
+from unittest.mock import Mock
+
+import discord
+from discord.ext.commands import Context as DiscordContext, NoPrivateMessage
 
 import discord_logs_uploader
 
@@ -16,6 +22,53 @@ discord_logs_uploader.logger.removeHandler(discord_logs_uploader.handler)
 def random_string(length: int) -> str:
     letters = string.ascii_letters + string.digits
     return ''.join(random.choice(letters) for i in range(length))
+
+
+class MockContext:
+    def __init__(self, text_channels: List[str] = [], voice_channels: List[str] = []) -> None:
+        channels: List[Union[discord.TextChannel, discord.VoiceChannel]] = []
+
+        for channel_name in text_channels:
+            channels.append(self.create_text_channel(channel_name))
+
+        for channel_name in voice_channels:
+            channels.append(self.create_voice_channel(channel_name))
+
+        self.context = self.create_context(channels)
+
+    async def mock_reply(self, *args: str) -> None:
+        pass
+
+    def create_text_channel(self, name: str) -> discord.TextChannel:
+        text_channel = Mock(spec=discord.TextChannel)
+        text_channel.name = name
+
+        # Required for python <3.8
+        text_channel.send = self.mock_reply
+        return text_channel
+
+    def create_voice_channel(self, name: str) -> discord.VoiceChannel:
+        voice_channel = Mock(spec=discord.VoiceChannel)
+        voice_channel.name = name
+        return voice_channel
+
+    def create_context(
+        self,
+        channels: Optional[List[Union[discord.TextChannel, discord.VoiceChannel]]] = None,
+    ) -> Mock:
+        test_context = Mock(spec=DiscordContext)
+
+        # Required for python <3.8
+        test_context.reply = self.mock_reply
+
+        if channels:
+            test_guild = Mock(spec=discord.Guild)
+            test_guild.channels = channels
+
+            test_context.guild = test_guild
+        else:
+            test_context.guild = None
+        return test_context
 
 
 class TestZipFileTesting(unittest.TestCase):
@@ -275,3 +328,127 @@ class TestExtractAnimations(unittest.TestCase):
                 self.animation_data,
                 "'data.tx' was corrupted",
             )
+
+
+class TestGetChannel(unittest.TestCase):
+    def setUp(self) -> None:
+        # make context w/ guild + channels
+        self.good_ctx = MockContext(
+            text_channels=['team-SRZ'],
+            voice_channels=['team-group'],
+        ).context
+
+    def test_no_guild(self) -> None:  # w/o guild set
+        # make context w/o guild
+        bad_ctx = MockContext().context
+
+        loop = asyncio.new_event_loop()
+        with self.assertRaises(NoPrivateMessage) as no_guild:
+            loop.run_until_complete(
+                discord_logs_uploader.get_channel(bad_ctx, 'test'),
+            )
+        loop.close()
+
+        self.assertIsNotNone(no_guild, "'NoPrivateMessage' was not raised")
+
+    def test_invalid_channel(self) -> None:
+        # w/ invalid channel name
+        loop = asyncio.new_event_loop()
+        with self.assertLogs() as logs:
+            result = loop.run_until_complete(
+                discord_logs_uploader.get_channel(self.good_ctx, 'test'),
+            )
+        loop.close()
+
+        self.assertIsNone(result, "No channel should have been returned")
+        self.assertEqual(len(logs.output), 1, "Additional logging is occuring")
+        self.assertIn("not found", logs.output[0], "Logger is not printing correctly")
+
+    def test_non_text_channel(self) -> None:
+        # w/ non-text channel
+        loop = asyncio.new_event_loop()
+        with self.assertLogs() as logs:
+            result = loop.run_until_complete(
+                discord_logs_uploader.get_channel(self.good_ctx, 'team-group'),
+            )
+        loop.close()
+
+        self.assertIsNone(result, "No channel should have been returned")
+        self.assertEqual(len(logs.output), 1, "Additional logging is occuring")
+        self.assertIn("not a text channel", logs.output[0], "Logger is not printing correctly")
+
+    def test_valid_channel(self) -> None:
+        # w/ valid text channel
+        loop = asyncio.new_event_loop()
+        result = loop.run_until_complete(
+            discord_logs_uploader.get_channel(self.good_ctx, 'team-SRZ'),
+        )
+        loop.close()
+
+        self.assertIsInstance(result, discord.TextChannel, "Text channel not returned")
+        self.assertEqual(result.name, 'team-SRZ', "Incorrect channel returned")  # type: ignore
+
+
+class TestGetTeamChannel(unittest.TestCase):
+    def setUp(self) -> None:
+        # make context w/ guild + channels
+        self.ctx = MockContext(
+            text_channels=['team-SRZ', 'blue-shirts'],
+        ).context
+
+    def test_invalid_tla(self) -> None:  # w/ invalid, existing TLA
+        loop = asyncio.new_event_loop()
+        with self.assertLogs() as logs:
+            result = loop.run_until_complete(
+                discord_logs_uploader.get_team_channel(
+                    self.ctx,
+                    'blue-shirts.zip',
+                    'combined.zip',
+                ),
+            )
+            loop.close()
+
+        # assert result[1], logs
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(len(result), 2)
+        self.assertIsNone(result[1])
+
+        self.assertIn("Failed to extract a TLA", logs.output[0])
+
+    def test_missing_tla(self) -> None:  # w/ valid, non-existant TLA
+        loop = asyncio.new_event_loop()
+        with self.assertLogs():
+            result = loop.run_until_complete(
+                discord_logs_uploader.get_team_channel(
+                    self.ctx,
+                    'team-SRX.zip',
+                    'combined.zip',
+                ),
+            )
+            loop.close()
+
+        # assert tla, result[1]
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(len(result), 2)
+        self.assertIsNone(result[1])
+
+        self.assertEqual(result[0], 'SRX')
+
+    def test_valid_tla(self) -> None:  # w/ valid TLA
+        loop = asyncio.new_event_loop()
+        result = loop.run_until_complete(
+            discord_logs_uploader.get_team_channel(
+                self.ctx,
+                'team-SRZ.zip',
+                'combined.zip',
+            ),
+        )
+        loop.close()
+
+        # assert tla, result[1]
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0], 'SRZ')
+
+        self.assertIsInstance(result[1], discord.TextChannel)
+        self.assertEqual(result[1].name, 'team-SRZ')  # type: ignore
