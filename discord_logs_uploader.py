@@ -446,5 +446,6 @@ async def on_command_error(ctx: commands.Context, exception: commands.CommandErr
         raise exception
 
 
-load_dotenv()
-bot.run(os.getenv('DISCORD_TOKEN', ''))
+if __name__ == "__main__":
+    load_dotenv()
+    bot.run(os.getenv('DISCORD_TOKEN', ''))
