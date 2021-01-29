@@ -119,7 +119,7 @@ async def get_team_channel(
     return tla, channel
 
 
-def pre_test_zipfile(archive_name: str, zipfile: ZipFile, zip_name: str) -> bool:
+def pre_test_zipfile(archive_name: str, zip_name: str) -> bool:
     if not archive_name.lower().endswith('.zip'):  # skip non-zips
         logger.debug(f"{archive_name} from {zip_name} is not a ZIP, skipping")
         return False
@@ -246,7 +246,7 @@ async def logs_upload(
                         await log_and_reply(ctx, "animations Zip file is missing")
 
                 for archive_name in zipfile.namelist():
-                    if not pre_test_zipfile(archive_name, zipfile, zip_name):
+                    if not pre_test_zipfile(archive_name, zip_name):
                         continue
 
                     zipfile.extract(archive_name, path=tmpdir)
