@@ -371,7 +371,13 @@ async def _logs_import(
             with ctx.typing():  # provides feedback that the bot is processing
                 await attachment.save(cast(BinaryIO, zipfile), seek_begin=True)
 
-                await logs_upload(ctx, zipfile, filename, event_name)
+                await logs_upload(
+                    ctx,
+                    zipfile,
+                    filename,
+                    event_name,
+                    ANIMATION_OPTIONS[animations],
+                )
     else:
         logger.error(
             f"ZIP file not attached to '{ctx.message.content}' from {ctx.author}",
@@ -433,7 +439,13 @@ async def _logs_download(
             # start processing from beginning of the file
             zipfile.seek(0)
 
-            await logs_upload(ctx, zipfile, filename, event_name)
+            await logs_upload(
+                ctx,
+                zipfile,
+                filename,
+                event_name,
+                ANIMATION_OPTIONS[animations],
+            )
 
 
 @bot.event
