@@ -206,14 +206,18 @@ async def send_file(
 def extract_animations(zipfile: ZipFile, tmpdir: Path, fully_extract: bool) -> bool:
     animation_files = [
         name for name in zipfile.namelist()
-        if name.startswith('animations')
+        if name.split('/')[-1].startswith('animations')
         and name.endswith('.zip')
     ]
 
     if not animation_files:
         return False
 
-    zipfile.extract(animation_files[0], path=tmpdir)
+    try:
+        zipfile.extract(animation_files[0], path=tmpdir)
+    except BadZipFile:
+        logger.warning("The animations zip was corrupt")
+        return False
 
     # give the animations archive + folder if fixed name
     shutil.move(str(tmpdir / animation_files[0]), str(tmpdir / 'animations.zip'))
