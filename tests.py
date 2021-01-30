@@ -334,7 +334,7 @@ class TestGetChannel(unittest.TestCase):
     def setUp(self) -> None:
         # make context w/ guild + channels
         self.good_ctx = MockContext(
-            text_channels=['team-SRZ'],
+            text_channels=['team-srz'],
             voice_channels=['team-group'],
         ).context
 
@@ -386,14 +386,14 @@ class TestGetChannel(unittest.TestCase):
         loop.close()
 
         self.assertIsInstance(result, discord.TextChannel, "Text channel not returned")
-        self.assertEqual(result.name, 'team-SRZ', "Incorrect channel returned")  # type: ignore
+        self.assertEqual(result.name, 'team-srz', "Incorrect channel returned")  # type: ignore
 
 
 class TestGetTeamChannel(unittest.TestCase):
     def setUp(self) -> None:
         # make context w/ guild + channels
         self.ctx = MockContext(
-            text_channels=['team-SRZ', 'blue-shirts'],
+            text_channels=['team-srz', 'blue-shirts'],
         ).context
 
     def test_invalid_tla(self) -> None:  # w/ invalid, existing TLA
@@ -451,4 +451,4 @@ class TestGetTeamChannel(unittest.TestCase):
         self.assertEqual(result[0], 'SRZ')
 
         self.assertIsInstance(result[1], discord.TextChannel)
-        self.assertEqual(result[1].name, 'team-SRZ')  # type: ignore
+        self.assertEqual(result[1].name, 'team-srz')  # type: ignore

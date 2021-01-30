@@ -64,6 +64,7 @@ async def get_channel(
     ctx: commands.Context,
     channel_name: str,
 ) -> Optional[discord.TextChannel]:
+    channel_name = channel_name.lower()  # all text/voice channels are lowercase
     guild = ctx.guild
     if DISCORD_DEBUG:
         # Always return calling channel
