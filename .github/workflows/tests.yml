@@ -27,6 +27,7 @@ jobs:
         declare -a FILES=(
           "script/linting/requirements.txt"
           "script/typing/requirements.txt"
+          "requirements.txt"
         )
         for f in ${FILES[@]}
         do
