@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 from discord.ext import commands
 
 # name of the role able to execute the command
-ADMIN_ROLE = 'Blue Shirt'
+ADMIN_ROLE = 'Blueshirt'
 
 # prefix of team channels
 TEAM_PREFIX = 'team-'
@@ -31,6 +31,7 @@ ANIMATION_OPTIONS = {
     'separate': False,
 }
 
+
 logger = logging.getLogger('logs_uploader')
 logger.setLevel(logging.INFO)
 handler = logging.StreamHandler(sys.stdout)
@@ -39,7 +40,8 @@ logger.addHandler(handler)
 
 
 # Don't post to team channels and force the guild used so testing can you DMs
-DISCORD_TESTING = bool(os.getenv('DISCORD_TESTING'))
+# DISCORD_TESTING = bool(os.getenv('DISCORD_TESTING'))
+DISCORD_TESTING = True
 # Just post all messages to calling channel, allow DMs
 DISCORD_DEBUG = bool(os.getenv('DISCORD_DEBUG'))
 if DISCORD_TESTING or DISCORD_DEBUG:
@@ -51,8 +53,8 @@ if DISCORD_TESTING or DISCORD_DEBUG:
 else:
     guild_only = commands.guild_only()
 
-
-bot = commands.Bot(command_prefix='!')
+discord_intents = discord.Intents(message_content=True)
+bot = commands.Bot(command_prefix='!', intents=discord_intents)
 
 
 async def log_and_reply(ctx: commands.Context, error_str: str) -> None:
